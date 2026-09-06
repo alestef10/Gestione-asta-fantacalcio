@@ -56,7 +56,6 @@ export default function App() {
     return () => supabase.removeChannel(channel)
   }, [loadAll])
 
-  // Quando cambia la fase corrente lato server, allinea il filtro visibile
   useEffect(() => {
     if (config?.current_phase) setFilterRuolo(config.current_phase)
   }, [config?.current_phase])
@@ -71,7 +70,7 @@ export default function App() {
     }
   }
 
-  // ---------- Slot base / massimi (globali, da config) ----------
+  // ---------- Slot base / massimi ----------
   const slotBase = useMemo(() => {
     if (!config) return { P: 3, D: 8, C: 8, A: 6 }
     return { P: config.slot_base_p, D: config.slot_base_d, C: config.slot_base_c, A: config.slot_base_a }
@@ -82,7 +81,6 @@ export default function App() {
     return { P: config.max_extra_p, D: config.max_extra_d, C: config.max_extra_c, A: config.max_extra_a }
   }, [config])
 
-  // Slot effettivi di una squadra per ruolo = base + extra_squadra (capped al massimo)
   const teamSlotFor = useCallback(
     (team, ruolo) => {
       const key = `extra_${ruolo.toLowerCase()}`
@@ -101,11 +99,11 @@ export default function App() {
       const rimanenti = t.crediti_iniziali - speso
       const perRuolo = {}
       for (const r of RUOLI) {
-        const occupati = teamPicks.filter((p) => {
+        const picksRuolo = teamPicks.filter((p) => {
           const pl = players.find((pp) => pp.id === p.player_id)
           return pl?.ruolo === r
-        }).length
-        perRuolo[r] = { occupati, tot: teamSlotFor(t, r) }
+        })
+        perRuolo[r] = { occupati: picksRuolo.length, tot: teamSlotFor(t, r), picks: picksRuolo }
       }
       const slotLiberi = RUOLI.reduce((s, r) => s + Math.max(perRuolo[r].tot - perRuolo[r].occupati, 0), 0)
       const maxRilancio = slotLiberi > 0 ? Math.max(rimanenti - (slotLiberi - 1), 0) : rimanenti
@@ -114,13 +112,21 @@ export default function App() {
     return map
   }, [teams, picks, players, teamSlotFor])
 
-  // ---------- Gestione slot per squadra (contestuale al ruolo attivo) ----------
+  // ---------- Slot per squadra (contestuali al ruolo attivo) ----------
   const changeTeamSlot = async (team, ruolo, delta) => {
     const key = `extra_${ruolo.toLowerCase()}`
     const current = team[key] || 0
     const next = Math.max(0, Math.min(maxExtra[ruolo], current + delta))
     if (next === current) return
     await supabase.from('teams').update({ [key]: next }).eq('id', team.id)
+  }
+
+  // ---------- Crediti squadra (modifica diretta sulla card) ----------
+  const updateTeamCredits = async (teamId, crediti) => {
+    const val = Number(crediti)
+    if (!Number.isFinite(val) || val < 0) return
+    const { error } = await supabase.from('teams').update({ crediti_iniziali: val }).eq('id', teamId)
+    if (error) alert('Errore aggiornando i crediti: ' + error.message)
   }
 
   // ---------- Import CSV lista giocatori ----------
@@ -131,14 +137,14 @@ export default function App() {
       complete: async (res) => {
         const rows = res.data
           .map((r) => ({
-            nome: (r.nome || r.Nome || '').trim(),
-            ruolo: (r.ruolo || r.Ruolo || '').trim().toUpperCase().slice(0, 1),
-            squadra_reale: (r.squadra || r.Squadra || r.squadra_reale || '').trim(),
-            codice: (r.codice || r.Codice || '').trim(),
+            nome: (r.Nome || r.nome || '').trim(),
+            ruolo: (r.Ruolo || r.ruolo || '').trim().toUpperCase().slice(0, 1),
+            squadra_reale: (r.Squadra || r.squadra || r.squadra_reale || '').trim(),
+            codice: (r.Id || r.ID || r.id || r.Codice || r.codice || '').toString().trim(),
           }))
           .filter((r) => r.nome && RUOLI.includes(r.ruolo))
         if (rows.length === 0) {
-          alert('Nessuna riga valida trovata. Colonne attese: nome, ruolo, squadra, codice')
+          alert('Nessuna riga valida trovata. Colonne attese: Nome, Ruolo, Squadra, Id')
           return
         }
         const { error } = await supabase.from('players').insert(rows)
@@ -190,10 +196,7 @@ export default function App() {
     setFilterRuolo(next)
   }
 
-  // ---------- Impostazioni avanzate ----------
-  const updateTeamCredits = async (teamId, crediti) => {
-    await supabase.from('teams').update({ crediti_iniziali: Number(crediti) }).eq('id', teamId)
-  }
+  // ---------- Impostazioni slot ----------
   const updateSlotSettings = async (patch) => {
     await supabase.from('config').update(patch).eq('id', 1)
   }
@@ -303,68 +306,69 @@ export default function App() {
         )}
       </div>
 
-      <div className="layout">
-        <aside className="sidebar">
-          <div className="ruolo-tabs">
-            {RUOLI.map((r, i) => {
-              const locked = i > phaseIndex
-              return (
-                <button
-                  key={r}
-                  disabled={locked}
-                  className={(filterRuolo === r ? 'active' : '') + (locked ? ' locked' : '')}
-                  onClick={() => !locked && setFilterRuolo(r)}
-                  title={locked ? 'Fase non ancora iniziata' : ''}
-                >
-                  {locked ? '🔒 ' : ''}
-                  {RUOLO_LABEL[r]}
-                </button>
-              )
-            })}
-          </div>
+      {/* ---------- Selezione giocatore: barra orizzontale in alto ---------- */}
+      <div className="selector-bar">
+        <div className="ruolo-tabs ruolo-tabs-horizontal">
+          {RUOLI.map((r, i) => {
+            const locked = i > phaseIndex
+            return (
+              <button
+                key={r}
+                disabled={locked}
+                className={(filterRuolo === r ? 'active' : '') + (locked ? ' locked' : '')}
+                onClick={() => !locked && setFilterRuolo(r)}
+                title={locked ? 'Fase non ancora iniziata' : ''}
+              >
+                {locked ? '🔒 ' : ''}
+                {RUOLO_LABEL[r]}
+              </button>
+            )
+          })}
           <input
-            className="search-box"
+            className="search-box search-box-inline"
             placeholder="Cerca giocatore…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <div className="player-list">
-            {filteredPlayers.length === 0 && <p className="empty-hint">Nessun giocatore disponibile.</p>}
-            {filteredPlayers.map((p) => (
-              <div key={p.id} className="player-row">
-                <div>
-                  <span className={`role-chip role-${p.ruolo}`}>{p.ruolo}</span>
-                  <strong>{p.nome}</strong>
-                  <div className="player-sub">{p.squadra_reale}</div>
-                </div>
-                {isEditor && (
-                  <button className="btn-mini" onClick={() => setAssignPlayer(p)}>
-                    Assegna
-                  </button>
-                )}
+        </div>
+        <div className="player-list-horizontal">
+          {filteredPlayers.length === 0 && <p className="empty-hint">Nessun giocatore disponibile.</p>}
+          {filteredPlayers.map((p) => (
+            <div key={p.id} className="player-chip-card">
+              <span className={`role-chip role-${p.ruolo}`}>{p.ruolo}</span>
+              <div className="player-chip-info">
+                <strong>{p.nome}</strong>
+                <span className="player-sub">{p.squadra_reale}</span>
               </div>
-            ))}
-          </div>
-        </aside>
-
-        <main className="board">
-          <div className="teams-grid">
-            {teams.map((t) => (
-              <TeamCard
-                key={t.id}
-                team={t}
-                stats={teamStats[t.id]}
-                players={players}
-                activeRuolo={filterRuolo}
-                maxExtra={maxExtra}
-                isEditor={isEditor}
-                onRemovePick={removePick}
-                onChangeSlot={changeTeamSlot}
-              />
-            ))}
-          </div>
-        </main>
+              {isEditor && (
+                <button className="btn-mini" onClick={() => setAssignPlayer(p)}>
+                  Assegna
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
+
+      {/* ---------- Squadre: riga orizzontale in basso ---------- */}
+      <main className="board">
+        <div className="teams-row">
+          {teams.map((t) => (
+            <TeamCard
+              key={t.id}
+              team={t}
+              stats={teamStats[t.id]}
+              players={players}
+              activeRuolo={filterRuolo}
+              maxExtra={maxExtra}
+              isEditor={isEditor}
+              onRemovePick={removePick}
+              onChangeSlot={changeTeamSlot}
+              onUpdateCredits={updateTeamCredits}
+            />
+          ))}
+        </div>
+      </main>
 
       {assignPlayer && (
         <AssignModal
@@ -391,7 +395,46 @@ export default function App() {
   )
 }
 
-function TeamCard({ team, stats, players, activeRuolo, maxExtra, isEditor, onRemovePick, onChangeSlot }) {
+function InlineCredits({ team, isEditor, onUpdateCredits }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(team.crediti_iniziali)
+
+  useEffect(() => {
+    setValue(team.crediti_iniziali)
+  }, [team.crediti_iniziali])
+
+  const save = () => {
+    setEditing(false)
+    if (Number(value) !== team.crediti_iniziali) onUpdateCredits(team.id, value)
+  }
+
+  if (!isEditor) {
+    return <span className="credits-pill">{team.crediti_iniziali} cr.</span>
+  }
+
+  if (!editing) {
+    return (
+      <button className="credits-pill credits-pill-editable" onClick={() => setEditing(true)} title="Modifica crediti">
+        {team.crediti_iniziali} cr. ✎
+      </button>
+    )
+  }
+
+  return (
+    <input
+      className="credits-edit-input"
+      type="number"
+      min="0"
+      autoFocus
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={save}
+      onKeyDown={(e) => e.key === 'Enter' && save()}
+    />
+  )
+}
+
+function TeamCard({ team, stats, players, activeRuolo, maxExtra, isEditor, onRemovePick, onChangeSlot, onUpdateCredits }) {
   const key = `extra_${activeRuolo.toLowerCase()}`
   const currentExtra = team[key] || 0
   const canAddSlot = isEditor && maxExtra[activeRuolo] > 0
@@ -400,7 +443,7 @@ function TeamCard({ team, stats, players, activeRuolo, maxExtra, isEditor, onRem
     <div className="team-card">
       <div className="team-card-header">
         <h3>{team.nome}</h3>
-        <span className="credits-pill">{team.crediti_iniziali} cr.</span>
+        <InlineCredits team={team} isEditor={isEditor} onUpdateCredits={onUpdateCredits} />
       </div>
       <div className="team-card-stats">
         <div>
@@ -438,20 +481,34 @@ function TeamCard({ team, stats, players, activeRuolo, maxExtra, isEditor, onRem
       )}
 
       <div className="team-roster">
-        {stats.picks.length === 0 && <p className="empty-hint">Nessun giocatore ancora.</p>}
-        {stats.picks.map((p) => {
-          const pl = players.find((pp) => pp.id === p.player_id)
+        {RUOLI.map((r) => {
+          const info = stats.perRuolo[r]
+          const emptySlots = Math.max(info.tot - info.occupati, 0)
+          if (info.tot === 0) return null
           return (
-            <div key={p.id} className="roster-row">
-              <span className={`role-chip role-${pl?.ruolo}`}>{pl?.ruolo}</span>
-              <span className="roster-name">{pl?.nome}</span>
-              <span className="roster-price">{p.prezzo}</span>
-              {p.tag !== 'normale' && <span className={`tag-chip tag-${p.tag}`}>{TAG_LABEL[p.tag]}</span>}
-              {isEditor && (
-                <button className="btn-x" onClick={() => onRemovePick(p.id, p.player_id)}>
-                  ×
-                </button>
-              )}
+            <div key={r} className="roster-role-group">
+              {info.picks.map((p) => {
+                const pl = players.find((pp) => pp.id === p.player_id)
+                return (
+                  <div key={p.id} className="roster-row">
+                    <span className={`role-chip role-${pl?.ruolo}`}>{pl?.ruolo}</span>
+                    <span className="roster-name">{pl?.nome}</span>
+                    <span className="roster-price">{p.prezzo}</span>
+                    {p.tag !== 'normale' && <span className={`tag-chip tag-${p.tag}`}>{TAG_LABEL[p.tag]}</span>}
+                    {isEditor && (
+                      <button className="btn-x" onClick={() => onRemovePick(p.id, p.player_id)}>
+                        ×
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+              {Array.from({ length: emptySlots }).map((_, i) => (
+                <div key={`empty-${r}-${i}`} className="roster-row roster-row-empty">
+                  <span className={`role-chip role-${r}`}>{r}</span>
+                  <span className="roster-name roster-empty-label">Slot libero</span>
+                </div>
+              ))}
             </div>
           )
         })}
@@ -510,7 +567,8 @@ function ImportModal({ onCancel, onFile }) {
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>Importa lista giocatori</h3>
         <p className="modal-hint">
-          File CSV con colonne: <code>nome, ruolo, squadra, codice</code>. Ruolo deve essere P, D, C o A.
+          File CSV con colonne: <code>Nome, Ruolo, Squadra, Id</code>. Ruolo deve essere P, D, C o A. Il campo Id
+          viene salvato ma mai mostrato durante la selezione.
         </p>
         <input type="file" accept=".csv" onChange={(e) => e.target.files[0] && onFile(e.target.files[0])} />
         <div className="modal-actions">
@@ -538,8 +596,9 @@ function SettingsModal({ config, teams, onCancel, onUpdateCredits, onUpdateSlotS
 
   const saveCredits = async () => {
     for (const t of teams) {
-      if (Number(credits[t.id]) !== t.crediti_iniziali) {
-        await onUpdateCredits(t.id, credits[t.id])
+      const val = Number(credits[t.id])
+      if (Number.isFinite(val) && val !== t.crediti_iniziali) {
+        await onUpdateCredits(t.id, val)
       }
     }
     alert('Crediti aggiornati.')
@@ -558,7 +617,7 @@ function SettingsModal({ config, teams, onCancel, onUpdateCredits, onUpdateSlotS
         <h4 className="settings-section-title">Slot base e massimi per ruolo</h4>
         <p className="modal-hint">
           "Base" è lo slot minimo garantito a ogni squadra. "Extra max" è quanti slot in più una squadra può
-          richiedere durante la relativa fase.
+          richiedere durante la relativa fase (dal pulsante +/- sulla card squadra).
         </p>
         <div className="settings-slot-grid">
           {RUOLI.map((r) => (
@@ -596,6 +655,10 @@ function SettingsModal({ config, teams, onCancel, onUpdateCredits, onUpdateSlotS
         </div>
 
         <h4 className="settings-section-title">Crediti iniziali per squadra</h4>
+        <p className="modal-hint">
+          Puoi anche modificare i crediti di ogni singola squadra direttamente cliccando sulla pillola crediti (✎)
+          nella relativa card, senza aprire questo pannello.
+        </p>
         <div className="settings-credits-grid">
           {teams.map((t) => (
             <label key={t.id} className="settings-credit-row">
@@ -652,7 +715,7 @@ function SetupScreen({ onCreate }) {
         <p>Prima di iniziare, crea le squadre partecipanti.</p>
         <label>Numero squadre</label>
         <input type="number" min="2" max="20" value={n} onChange={(e) => handleNChange(e.target.value)} />
-        <label>Crediti iniziali (uguali per tutti, modificabile dopo per squadra dal pannello Impostazioni)</label>
+        <label>Crediti iniziali (uguali per tutti, modificabile dopo per squadra direttamente sulla card)</label>
         <input
           type="number"
           min="500"
