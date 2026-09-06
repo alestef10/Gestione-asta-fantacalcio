@@ -176,6 +176,12 @@ button { cursor: pointer; font-family: 'Inter', sans-serif; border: none; }
 .last-bid-info { color: #ffffff; font-size: 13px; }
 .last-bid-info strong { color: var(--role-p); }
 .timer-controls button:disabled { opacity: 0.5; cursor: not-allowed; }
+.timer-controls .btn-secondary {
+  background: #ffffff;
+  color: var(--text-main);
+  border: 1px solid #ffffff;
+}
+.timer-controls .btn-secondary:hover { background: var(--card-incomplete); }
 .timer-display {
   font-family: 'Barlow Condensed', sans-serif;
   font-size: 48px;
