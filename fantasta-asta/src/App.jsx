@@ -179,6 +179,11 @@ export default function App() {
   // ---------- Assegnazione giocatore ----------
   const confirmAssign = async ({ teamId, prezzo, tag }) => {
     if (!assignPlayer) return
+    const info = teamStats[teamId]?.perRuolo?.[assignPlayer.ruolo]
+    if (info && info.occupati >= info.tot) {
+      alert('Questa squadra non ha più slot liberi per questo ruolo.')
+      return
+    }
     const { error } = await supabase.from('picks').insert({
       team_id: teamId,
       player_id: assignPlayer.id,
@@ -223,6 +228,17 @@ export default function App() {
     }
     setFilterRuolo(next)
   }
+  const goBackPhase = async () => {
+    const prev = RUOLI[phaseIndex - 1]
+    if (!prev) return
+    if (!confirm(`Tornare alla fase "${RUOLO_LABEL[prev]}"? Si potrà comunque riavanzare in seguito.`)) return
+    const { error } = await supabase.from('config').update({ current_phase: prev }).eq('id', 1)
+    if (error) {
+      alert('Errore tornando alla fase precedente: ' + error.message)
+      return
+    }
+    setFilterRuolo(prev)
+  }
 
   // ---------- Impostazioni slot ----------
   const updateSlotSettings = async (patch) => {
@@ -256,7 +272,7 @@ export default function App() {
     alert('Tutto cancellato. Ricarica la pagina per ricominciare dal setup.')
   }
 
-  // ---------- Export Excel ----------
+  // ---------- Export Excel (riepilogo generale) ----------
   const exportExcel = () => {
     const rows = []
     for (const t of teams) {
@@ -285,6 +301,33 @@ export default function App() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Rose Asta')
     XLSX.writeFile(wb, `asta_fantacalcio_${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+
+  // ---------- Export CSV per import su piattaforme lega (Fantacalcio-Online, Leghe Fantacalcio, ecc.) ----------
+  const exportForLega = () => {
+    const rows = []
+    for (const t of teams) {
+      const st = teamStats[t.id]
+      for (const p of st.picks) {
+        const pl = players.find((pp) => pp.id === p.player_id)
+        rows.push({
+          Fantasquadra: t.nome,
+          Calciatore: pl?.nome || '?',
+          Ruolo: pl?.ruolo || '?',
+          'Squadra Serie A': pl?.squadra_reale || '?',
+          Prezzo: p.prezzo,
+          Id: pl?.codice || '',
+        })
+      }
+    }
+    const csv = Papa.unparse(rows, { delimiter: ';' })
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `rose_import_lega_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   const filteredPlayers = useMemo(() => {
@@ -335,6 +378,9 @@ export default function App() {
           <button className="btn-primary" onClick={exportExcel}>
             Esporta Excel
           </button>
+          <button className="btn-primary btn-primary-alt" onClick={exportForLega}>
+            Esporta per import lega
+          </button>
         </div>
       </header>
 
@@ -359,6 +405,11 @@ export default function App() {
               </button>
             )
           })}
+          {isEditor && phaseIndex > 0 && (
+            <button className="btn-secondary phase-back-btn" onClick={goBackPhase}>
+              ← Torna a {RUOLO_LABEL[RUOLI[phaseIndex - 1]]}
+            </button>
+          )}
           {isEditor && phaseIndex < RUOLI.length - 1 && (
             <button className="btn-mini phase-advance-btn" onClick={advancePhase}>
               Passa a {RUOLO_LABEL[RUOLI[phaseIndex + 1]]} →
@@ -404,7 +455,6 @@ export default function App() {
               isEditor={isEditor}
               onRemovePick={removePick}
               onChangeSlot={changeTeamSlot}
-              onUpdateCredits={updateTeamCredits}
             />
           ))}
         </div>
@@ -437,46 +487,7 @@ export default function App() {
   )
 }
 
-function InlineCredits({ team, isEditor, onUpdateCredits }) {
-  const [editing, setEditing] = useState(false)
-  const [value, setValue] = useState(team.crediti_iniziali)
-
-  useEffect(() => {
-    setValue(team.crediti_iniziali)
-  }, [team.crediti_iniziali])
-
-  const save = () => {
-    setEditing(false)
-    if (Number(value) !== team.crediti_iniziali) onUpdateCredits(team.id, value)
-  }
-
-  if (!isEditor) {
-    return <span className="credits-pill">{team.crediti_iniziali} cr.</span>
-  }
-
-  if (!editing) {
-    return (
-      <button className="credits-pill credits-pill-editable" onClick={() => setEditing(true)} title="Modifica crediti">
-        {team.crediti_iniziali} cr. ✎
-      </button>
-    )
-  }
-
-  return (
-    <input
-      className="credits-edit-input"
-      type="number"
-      min="0"
-      autoFocus
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={save}
-      onKeyDown={(e) => e.key === 'Enter' && save()}
-    />
-  )
-}
-
-function TeamCard({ team, stats, players, activeRuolo, maxExtra, isEditor, onRemovePick, onChangeSlot, onUpdateCredits }) {
+function TeamCard({ team, stats, players, activeRuolo, maxExtra, isEditor, onRemovePick, onChangeSlot }) {
   const key = `extra_${activeRuolo.toLowerCase()}`
   const currentExtra = team[key] || 0
   const canAddSlot = isEditor && maxExtra[activeRuolo] > 0
@@ -500,7 +511,7 @@ function TeamCard({ team, stats, players, activeRuolo, maxExtra, isEditor, onRem
             </div>
           )}
         </div>
-        <InlineCredits team={team} isEditor={isEditor} onUpdateCredits={onUpdateCredits} />
+        <span className="credits-pill">{team.crediti_iniziali} cr.</span>
       </div>
       <div className="team-card-stats">
         <div>
@@ -563,7 +574,13 @@ function TeamCard({ team, stats, players, activeRuolo, maxExtra, isEditor, onRem
 }
 
 function AssignModal({ player, teams, teamStats, onCancel, onConfirm }) {
-  const [teamId, setTeamId] = useState(teams[0]?.id || '')
+  const teamsWithRoom = teams.filter((t) => {
+    const info = teamStats[t.id]?.perRuolo?.[player.ruolo]
+    return info && info.occupati < info.tot
+  })
+  const teamsFull = teams.filter((t) => !teamsWithRoom.includes(t))
+
+  const [teamId, setTeamId] = useState(teamsWithRoom[0]?.id || '')
   const [prezzo, setPrezzo] = useState(1)
   const [tag, setTag] = useState('normale')
 
@@ -575,31 +592,47 @@ function AssignModal({ player, teams, teamStats, onCancel, onConfirm }) {
         <h3>
           Assegna <strong>{player.nome}</strong> ({player.ruolo} – {player.squadra_reale})
         </h3>
-        <label>Squadra</label>
-        <select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
-          {teams.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.nome} — rimanenti {teamStats[t.id]?.rimanenti}
-            </option>
-          ))}
-        </select>
-        <label>Prezzo (crediti)</label>
-        <input type="number" min="1" value={prezzo} onChange={(e) => setPrezzo(e.target.value)} />
-        <label>Tipo</label>
-        <select value={tag} onChange={(e) => setTag(e.target.value)}>
-          {tagOptions.map((t) => (
-            <option key={t} value={t}>
-              {TAG_LABEL[t]}
-            </option>
-          ))}
-        </select>
+        {teamsWithRoom.length === 0 ? (
+          <p className="modal-hint danger-text">
+            Nessuna squadra ha più slot liberi per il ruolo {player.ruolo}. Aumenta gli slot extra dalla card
+            squadra (se la fase lo consente) oppure annulla.
+          </p>
+        ) : (
+          <>
+            <label>Squadra</label>
+            <select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+              {teamsWithRoom.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.nome} — rimanenti {teamStats[t.id]?.rimanenti}
+                </option>
+              ))}
+            </select>
+            {teamsFull.length > 0 && (
+              <p className="modal-hint">
+                Slot {player.ruolo} pieni per: {teamsFull.map((t) => t.nome).join(', ')}
+              </p>
+            )}
+            <label>Prezzo (crediti)</label>
+            <input type="number" min="1" value={prezzo} onChange={(e) => setPrezzo(e.target.value)} />
+            <label>Tipo</label>
+            <select value={tag} onChange={(e) => setTag(e.target.value)}>
+              {tagOptions.map((t) => (
+                <option key={t} value={t}>
+                  {TAG_LABEL[t]}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
         <div className="modal-actions">
           <button className="btn-secondary" onClick={onCancel}>
             Annulla
           </button>
-          <button className="btn-primary" onClick={() => onConfirm({ teamId, prezzo, tag })}>
-            Conferma acquisto
-          </button>
+          {teamsWithRoom.length > 0 && (
+            <button className="btn-primary" onClick={() => onConfirm({ teamId, prezzo, tag })}>
+              Conferma acquisto
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -751,6 +784,7 @@ function SetupScreen({ onCreate }) {
   const [n, setN] = useState(12)
   const [creditiDefault, setCreditiDefault] = useState(500)
   const [names, setNames] = useState(Array.from({ length: 12 }, (_, i) => `Squadra ${i + 1}`))
+  const [credits, setCredits] = useState(Array.from({ length: 12 }, () => 500))
 
   const handleNChange = (val) => {
     const num = Number(val)
@@ -760,10 +794,19 @@ function SetupScreen({ onCreate }) {
       while (arr.length < num) arr.push(`Squadra ${arr.length + 1}`)
       return arr.slice(0, num)
     })
+    setCredits((prev) => {
+      const arr = [...prev]
+      while (arr.length < num) arr.push(creditiDefault)
+      return arr.slice(0, num)
+    })
+  }
+
+  const applyDefaultToAll = () => {
+    setCredits(names.map(() => creditiDefault))
   }
 
   const submit = () => {
-    const list = names.map((nome) => ({ nome, crediti_iniziali: Number(creditiDefault) }))
+    const list = names.map((nome, i) => ({ nome, crediti_iniziali: Number(credits[i]) || 500 }))
     onCreate(list)
   }
 
@@ -771,29 +814,47 @@ function SetupScreen({ onCreate }) {
     <div className="setup-screen">
       <div className="setup-card">
         <h2>Configura l'asta</h2>
-        <p>Prima di iniziare, crea le squadre partecipanti.</p>
+        <p>Prima di iniziare, crea le squadre partecipanti. Puoi dare a ciascuna un budget diverso.</p>
         <label>Numero squadre</label>
         <input type="number" min="2" max="20" value={n} onChange={(e) => handleNChange(e.target.value)} />
-        <label>Crediti iniziali (uguali per tutti, modificabile dopo per squadra direttamente sulla card)</label>
-        <input
-          type="number"
-          min="500"
-          max="725"
-          value={creditiDefault}
-          onChange={(e) => setCreditiDefault(e.target.value)}
-        />
-        <label>Nomi squadre</label>
-        <div className="names-grid">
+
+        <label>Crediti di default (usali come base, poi personalizza ogni squadra sotto se serve)</label>
+        <div className="setup-default-credits-row">
+          <input
+            type="number"
+            min="0"
+            value={creditiDefault}
+            onChange={(e) => setCreditiDefault(Number(e.target.value))}
+          />
+          <button type="button" className="btn-secondary" onClick={applyDefaultToAll}>
+            Applica a tutte
+          </button>
+        </div>
+
+        <label>Nome e crediti per ogni squadra</label>
+        <div className="names-grid setup-team-grid">
           {names.map((name, i) => (
-            <input
-              key={i}
-              value={name}
-              onChange={(e) => {
-                const arr = [...names]
-                arr[i] = e.target.value
-                setNames(arr)
-              }}
-            />
+            <div key={i} className="setup-team-row">
+              <input
+                value={name}
+                onChange={(e) => {
+                  const arr = [...names]
+                  arr[i] = e.target.value
+                  setNames(arr)
+                }}
+              />
+              <input
+                type="number"
+                min="0"
+                className="setup-team-credits"
+                value={credits[i] ?? creditiDefault}
+                onChange={(e) => {
+                  const arr = [...credits]
+                  arr[i] = e.target.value
+                  setCredits(arr)
+                }}
+              />
+            </div>
           ))}
         </div>
         <button className="btn-primary" onClick={submit}>
