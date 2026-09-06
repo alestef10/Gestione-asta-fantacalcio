@@ -28,6 +28,15 @@ export default function App() {
   const [assignPlayer, setAssignPlayer] = useState(null)
   const [importOpen, setImportOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
+  const [timerDurationInput, setTimerDurationInput] = useState(60)
+  const [myTeamId, setMyTeamId] = useState(() => localStorage.getItem('asta_my_team_id') || '')
+
+  const chooseMyTeam = (teamId) => {
+    setMyTeamId(teamId)
+    if (teamId) localStorage.setItem('asta_my_team_id', teamId)
+    else localStorage.removeItem('asta_my_team_id')
+  }
 
   // ---------- Caricamento dati + realtime ----------
   const loadAll = useCallback(async () => {
@@ -59,6 +68,17 @@ export default function App() {
   useEffect(() => {
     if (config?.current_phase) setFilterRuolo(config.current_phase)
   }, [config?.current_phase])
+
+  useEffect(() => {
+    if (config?.timer_duration) setTimerDurationInput(config.timer_duration)
+  }, [config?.timer_duration])
+
+  // Ticking del countdown: aggiorna ogni 250ms solo se un timer è attivo
+  useEffect(() => {
+    if (!config?.timer_active) return
+    const interval = setInterval(() => setNow(Date.now()), 250)
+    return () => clearInterval(interval)
+  }, [config?.timer_active])
 
   // ---------- Editor PIN ----------
   const tryUnlock = () => {
@@ -202,6 +222,33 @@ export default function App() {
     if (!confirm('Annullare questo acquisto?')) return
     await supabase.from('picks').delete().eq('id', pickId)
     await supabase.from('players').update({ acquistato: false }).eq('id', playerId)
+  }
+
+  // ---------- Countdown asta ----------
+  const timerActive = !!config?.timer_active
+  const timerEndAt = config?.timer_end_at ? new Date(config.timer_end_at).getTime() : null
+  const remainingMs = timerActive && timerEndAt ? Math.max(0, timerEndAt - now) : null
+  const remainingSeconds = remainingMs !== null ? Math.ceil(remainingMs / 1000) : null
+  const timerExpired = timerActive && remainingSeconds === 0
+
+  const startOrRestartTimer = async () => {
+    const duration = Math.max(1, Number(timerDurationInput) || 60)
+    const endAt = new Date(Date.now() + duration * 1000).toISOString()
+    const { error } = await supabase
+      .from('config')
+      .update({ timer_duration: duration, timer_end_at: endAt, timer_active: true, last_bid_team_id: myTeamId || null })
+      .eq('id', 1)
+    if (error) {
+      alert(
+        'Errore avviando il countdown: ' +
+          error.message +
+          "\n\nProbabile causa: mancano le colonne timer_*/last_bid_team_id su Supabase. Esegui migration_fasi_slot.sql nell'SQL Editor."
+      )
+    }
+  }
+
+  const resetTimer = async () => {
+    await supabase.from('config').update({ timer_end_at: null, timer_active: false, last_bid_team_id: null }).eq('id', 1)
   }
 
   // ---------- Setup squadre iniziali ----------
@@ -391,6 +438,59 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      <div className="timer-bar">
+        <div className="my-team-picker">
+          <span>Sei:</span>
+          <select value={myTeamId} onChange={(e) => chooseMyTeam(e.target.value)}>
+            <option value="">— seleziona la tua squadra —</option>
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.nome}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className={'timer-display' + (timerExpired ? ' expired' : timerActive ? ' running' : ' idle')}>
+          {remainingSeconds !== null ? remainingSeconds : '—'}
+          <span className="timer-unit">sec</span>
+        </div>
+        <div className="timer-controls">
+          <input
+            type="number"
+            min="1"
+            className="timer-duration-input"
+            value={timerDurationInput}
+            onChange={(e) => setTimerDurationInput(e.target.value)}
+            title="Durata countdown in secondi"
+          />
+          {!timerExpired ? (
+            <button
+              className="btn-primary"
+              onClick={startOrRestartTimer}
+              disabled={!myTeamId}
+              title={!myTeamId ? 'Seleziona prima la tua squadra' : ''}
+            >
+              {timerActive ? 'Riavvia' : 'Avvia'} countdown
+            </button>
+          ) : (
+            <button className="btn-secondary" onClick={resetTimer}>
+              Prossimo giocatore →
+            </button>
+          )}
+        </div>
+
+        <div className="last-bid-info">
+          {config?.last_bid_team_id ? (
+            <>
+              Ultimo rilancio: <strong>{teams.find((t) => t.id === config.last_bid_team_id)?.nome || '—'}</strong>
+            </>
+          ) : (
+            <span className="empty-hint">Nessun rilancio ancora</span>
+          )}
+        </div>
+      </div>
 
       {/* ---------- Fase asta + selezione giocatore: un'unica barra in alto ---------- */}
       <div className="selector-bar">
