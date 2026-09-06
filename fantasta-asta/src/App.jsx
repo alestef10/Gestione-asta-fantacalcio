@@ -72,13 +72,25 @@ export default function App() {
 
   // ---------- Slot base / massimi ----------
   const slotBase = useMemo(() => {
-    if (!config) return { P: 3, D: 8, C: 8, A: 6 }
-    return { P: config.slot_base_p, D: config.slot_base_d, C: config.slot_base_c, A: config.slot_base_a }
+    const d = { P: 3, D: 8, C: 8, A: 6 }
+    if (!config) return d
+    return {
+      P: config.slot_base_p ?? d.P,
+      D: config.slot_base_d ?? d.D,
+      C: config.slot_base_c ?? d.C,
+      A: config.slot_base_a ?? d.A,
+    }
   }, [config])
 
   const maxExtra = useMemo(() => {
-    if (!config) return { P: 0, D: 2, C: 2, A: 1 }
-    return { P: config.max_extra_p, D: config.max_extra_d, C: config.max_extra_c, A: config.max_extra_a }
+    const d = { P: 0, D: 2, C: 2, A: 1 }
+    if (!config) return d
+    return {
+      P: config.max_extra_p ?? d.P,
+      D: config.max_extra_d ?? d.D,
+      C: config.max_extra_c ?? d.C,
+      A: config.max_extra_a ?? d.A,
+    }
   }, [config])
 
   const teamSlotFor = useCallback(
@@ -118,7 +130,14 @@ export default function App() {
     const current = team[key] || 0
     const next = Math.max(0, Math.min(maxExtra[ruolo], current + delta))
     if (next === current) return
-    await supabase.from('teams').update({ [key]: next }).eq('id', team.id)
+    const { error } = await supabase.from('teams').update({ [key]: next }).eq('id', team.id)
+    if (error) {
+      alert(
+        'Errore aggiornando lo slot: ' +
+          error.message +
+          "\n\nProbabile causa: mancano le colonne extra_p/d/c/a su Supabase. Esegui migration_fasi_slot.sql nell'SQL Editor."
+      )
+    }
   }
 
   // ---------- Crediti squadra (modifica diretta sulla card) ----------
@@ -187,18 +206,54 @@ export default function App() {
   }
 
   // ---------- Fasi asta ----------
-  const phaseIndex = RUOLI.indexOf(config?.current_phase || 'P')
+  const currentPhase = config?.current_phase && RUOLI.includes(config.current_phase) ? config.current_phase : 'P'
+  const phaseIndex = RUOLI.indexOf(currentPhase)
   const advancePhase = async () => {
     const next = RUOLI[phaseIndex + 1]
     if (!next) return
     if (!confirm(`Passare alla fase "${RUOLO_LABEL[next]}"? Le fasi precedenti restano comunque consultabili.`)) return
-    await supabase.from('config').update({ current_phase: next }).eq('id', 1)
+    const { error } = await supabase.from('config').update({ current_phase: next }).eq('id', 1)
+    if (error) {
+      alert(
+        'Errore avanzando la fase: ' +
+          error.message +
+          '\n\nProbabile causa: manca la colonna current_phase su Supabase. Esegui migration_fasi_slot.sql nell\'SQL Editor.'
+      )
+      return
+    }
     setFilterRuolo(next)
   }
 
   // ---------- Impostazioni slot ----------
   const updateSlotSettings = async (patch) => {
     await supabase.from('config').update(patch).eq('id', 1)
+  }
+
+  // ---------- Reset asta ----------
+  const resetAsta = async () => {
+    const conferma = prompt(
+      'Questo cancellerà TUTTI gli acquisti fatti finora (le squadre e la lista giocatori restano). Scrivi RESET per confermare:'
+    )
+    if (conferma !== 'RESET') return
+    await supabase.from('picks').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    await supabase.from('players').update({ acquistato: false }).neq('id', '00000000-0000-0000-0000-000000000000')
+    for (const t of teams) {
+      await supabase.from('teams').update({ extra_p: 0, extra_d: 0, extra_c: 0, extra_a: 0 }).eq('id', t.id)
+    }
+    await supabase.from('config').update({ current_phase: 'P' }).eq('id', 1)
+    alert('Asta resettata: acquisti azzerati, fase riportata a Portieri.')
+  }
+
+  const wipeEverything = async () => {
+    const conferma = prompt(
+      'Questo cancellerà ANCHE le squadre e la lista giocatori importata (si riparte dalla schermata di setup iniziale). Scrivi CANCELLA TUTTO per confermare:'
+    )
+    if (conferma !== 'CANCELLA TUTTO') return
+    await supabase.from('picks').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    await supabase.from('players').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    await supabase.from('teams').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    await supabase.from('config').update({ current_phase: 'P' }).eq('id', 1)
+    alert('Tutto cancellato. Ricarica la pagina per ricominciare dal setup.')
   }
 
   // ---------- Export Excel ----------
@@ -283,47 +338,32 @@ export default function App() {
         </div>
       </header>
 
-      <div className="phase-bar">
-        <div className="phase-steps">
-          {RUOLI.map((r, i) => (
-            <span
-              key={r}
-              className={
-                'phase-step' +
-                (i === phaseIndex ? ' current' : '') +
-                (i < phaseIndex ? ' done' : '') +
-                (i > phaseIndex ? ' upcoming' : '')
-              }
-            >
-              {RUOLO_LABEL[r]}
-            </span>
-          ))}
-        </div>
-        {isEditor && phaseIndex < RUOLI.length - 1 && (
-          <button className="btn-mini" onClick={advancePhase}>
-            Passa a {RUOLO_LABEL[RUOLI[phaseIndex + 1]]} →
-          </button>
-        )}
-      </div>
-
-      {/* ---------- Selezione giocatore: barra orizzontale in alto ---------- */}
+      {/* ---------- Fase asta + selezione giocatore: un'unica barra in alto ---------- */}
       <div className="selector-bar">
-        <div className="ruolo-tabs ruolo-tabs-horizontal">
+        <div className="ruolo-tabs-horizontal">
           {RUOLI.map((r, i) => {
             const locked = i > phaseIndex
+            const done = i < phaseIndex
             return (
               <button
                 key={r}
                 disabled={locked}
-                className={(filterRuolo === r ? 'active' : '') + (locked ? ' locked' : '')}
+                className={
+                  (filterRuolo === r ? 'active' : '') + (locked ? ' locked' : '') + (done ? ' done' : '')
+                }
                 onClick={() => !locked && setFilterRuolo(r)}
                 title={locked ? 'Fase non ancora iniziata' : ''}
               >
-                {locked ? '🔒 ' : ''}
+                {locked ? '🔒 ' : done ? '✓ ' : ''}
                 {RUOLO_LABEL[r]}
               </button>
             )
           })}
+          {isEditor && phaseIndex < RUOLI.length - 1 && (
+            <button className="btn-mini phase-advance-btn" onClick={advancePhase}>
+              Passa a {RUOLO_LABEL[RUOLI[phaseIndex + 1]]} →
+            </button>
+          )}
           <input
             className="search-box search-box-inline"
             placeholder="Cerca giocatore…"
@@ -389,6 +429,8 @@ export default function App() {
           onCancel={() => setSettingsOpen(false)}
           onUpdateCredits={updateTeamCredits}
           onUpdateSlotSettings={updateSlotSettings}
+          onResetAsta={resetAsta}
+          onWipeEverything={wipeEverything}
         />
       )}
     </div>
@@ -442,7 +484,22 @@ function TeamCard({ team, stats, players, activeRuolo, maxExtra, isEditor, onRem
   return (
     <div className="team-card">
       <div className="team-card-header">
-        <h3>{team.nome}</h3>
+        <div className="team-card-title">
+          <h3>{team.nome}</h3>
+          {canAddSlot && (
+            <div className="slot-request-inline" title={`Slot extra ${RUOLO_LABEL[activeRuolo]}`}>
+              <button onClick={() => onChangeSlot(team, activeRuolo, -1)} disabled={currentExtra <= 0}>
+                −
+              </button>
+              <span>
+                +{currentExtra}/{maxExtra[activeRuolo]} {activeRuolo}
+              </span>
+              <button onClick={() => onChangeSlot(team, activeRuolo, 1)} disabled={currentExtra >= maxExtra[activeRuolo]}>
+                +
+              </button>
+            </div>
+          )}
+        </div>
         <InlineCredits team={team} isEditor={isEditor} onUpdateCredits={onUpdateCredits} />
       </div>
       <div className="team-card-stats">
@@ -467,18 +524,6 @@ function TeamCard({ team, stats, players, activeRuolo, maxExtra, isEditor, onRem
         ))}
       </div>
 
-      {canAddSlot && (
-        <div className="team-slot-request">
-          <span>Slot extra {RUOLO_LABEL[activeRuolo]}</span>
-          <div className="stepper">
-            <button onClick={() => onChangeSlot(team, activeRuolo, -1)}>−</button>
-            <strong>
-              {currentExtra}/{maxExtra[activeRuolo]}
-            </strong>
-            <button onClick={() => onChangeSlot(team, activeRuolo, 1)}>+</button>
-          </div>
-        </div>
-      )}
 
       <div className="team-roster">
         {RUOLI.map((r) => {
@@ -581,7 +626,7 @@ function ImportModal({ onCancel, onFile }) {
   )
 }
 
-function SettingsModal({ config, teams, onCancel, onUpdateCredits, onUpdateSlotSettings }) {
+function SettingsModal({ config, teams, onCancel, onUpdateCredits, onUpdateSlotSettings, onResetAsta, onWipeEverything }) {
   const [credits, setCredits] = useState(() => Object.fromEntries(teams.map((t) => [t.id, t.crediti_iniziali])))
   const [slots, setSlots] = useState({
     slot_base_p: config.slot_base_p,
@@ -675,6 +720,20 @@ function SettingsModal({ config, teams, onCancel, onUpdateCredits, onUpdateSlotS
         <div className="modal-actions">
           <button className="btn-primary" onClick={saveCredits}>
             Salva crediti
+          </button>
+        </div>
+
+        <h4 className="settings-section-title danger-title">Zona pericolosa</h4>
+        <p className="modal-hint">
+          Reset asta: cancella tutti gli acquisti e riporta la fase a Portieri, ma mantiene squadre e lista
+          giocatori. Cancella tutto: azzera anche squadre e lista giocatori, si riparte dal setup iniziale.
+        </p>
+        <div className="modal-actions danger-actions">
+          <button className="btn-danger" onClick={onResetAsta}>
+            Reset asta (mantieni squadre e lista)
+          </button>
+          <button className="btn-danger btn-danger-strong" onClick={onWipeEverything}>
+            Cancella tutto
           </button>
         </div>
 
