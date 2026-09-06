@@ -39,18 +39,26 @@ export default function App() {
   }
 
   // ---------- Caricamento dati + realtime ----------
+  const [loadError, setLoadError] = useState(null)
+
   const loadAll = useCallback(async () => {
-    const [cfgRes, teamsRes, playersRes, picksRes] = await Promise.all([
-      supabase.from('config').select('*').eq('id', 1).single(),
-      supabase.from('teams').select('*').order('nome'),
-      supabase.from('players').select('*').order('nome'),
-      supabase.from('picks').select('*'),
-    ])
-    setConfig(cfgRes.data)
-    setTeams(teamsRes.data || [])
-    setPlayers(playersRes.data || [])
-    setPicks(picksRes.data || [])
-    setLoading(false)
+    try {
+      const [cfgRes, teamsRes, playersRes, picksRes] = await Promise.all([
+        supabase.from('config').select('*').eq('id', 1).single(),
+        supabase.from('teams').select('*').order('nome'),
+        supabase.from('players').select('*').order('nome'),
+        supabase.from('picks').select('*'),
+      ])
+      setConfig(cfgRes.data)
+      setTeams(teamsRes.data || [])
+      setPlayers(playersRes.data || [])
+      setPicks(picksRes.data || [])
+      setLoadError(null)
+    } catch (err) {
+      setLoadError(err?.message || 'Errore di connessione al database.')
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -394,6 +402,24 @@ export default function App() {
   }, [players, filterRuolo, search])
 
   if (loading) return <div className="loading-screen">Caricamento asta…</div>
+
+  if (loadError) {
+    return (
+      <div className="loading-screen error-screen">
+        <p>Non riesco a connettermi al database.</p>
+        <p className="error-detail">{loadError}</p>
+        <button
+          className="btn-primary"
+          onClick={() => {
+            setLoading(true)
+            loadAll()
+          }}
+        >
+          Riprova
+        </button>
+      </div>
+    )
+  }
 
   if (teams.length === 0) {
     return <SetupScreen onCreate={createTeams} />
