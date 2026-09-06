@@ -145,44 +145,16 @@ button { cursor: pointer; font-family: 'Inter', sans-serif; border: none; }
   color: var(--text-main); font-weight: 700;
 }
 
-/* ---------- Phase bar ---------- */
-.phase-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 24px;
-  background: var(--surface-alt);
-  border-bottom: 1px solid var(--border);
+/* ---------- Zona pericolosa (reset) ---------- */
+.danger-title { color: var(--danger); }
+.danger-actions { flex-wrap: wrap; }
+.btn-danger {
+  background: #ffffff; color: var(--danger); border: 1px solid var(--danger);
+  padding: 9px 16px; border-radius: 8px; font-weight: 600;
 }
-.phase-steps { display: flex; gap: 8px; }
-.phase-step {
-  font-size: 12px;
-  font-weight: 700;
-  padding: 5px 12px;
-  border-radius: 20px;
-  background: var(--surface);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-}
-.phase-step.done { background: var(--role-c); color: #ffffff; border-color: var(--role-c); }
-.phase-step.current { background: var(--btn-primary); color: #ffffff; border-color: var(--btn-primary); }
-.phase-step.upcoming { opacity: 0.55; }
-
-.ruolo-tabs button.locked { opacity: 0.45; cursor: not-allowed; }
-
-/* ---------- Slot extra per squadra ---------- */
-.team-slot-request {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--surface-alt);
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-  padding: 6px 10px;
-  margin-bottom: 10px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
+.btn-danger:hover { background: #fdecec; }
+.btn-danger-strong { background: var(--danger); color: #ffffff; }
+.btn-danger-strong:hover { filter: brightness(1.08); }
 
 /* ---------- Settings modal ---------- */
 .modal-wide { width: 520px; max-height: 85vh; overflow-y: auto; }
@@ -221,6 +193,8 @@ button { cursor: pointer; font-family: 'Inter', sans-serif; border: none; }
 }
 .ruolo-tabs-horizontal button.active { background: var(--btn-primary); color: #ffffff; }
 .ruolo-tabs-horizontal button.locked { opacity: 0.45; cursor: not-allowed; }
+.ruolo-tabs-horizontal button.done { background: var(--role-d); color: #ffffff; }
+.phase-advance-btn { margin-left: 6px; }
 .search-box-inline { margin-left: auto; width: 220px; margin-bottom: 0; }
 
 .search-box {
@@ -270,8 +244,19 @@ button { cursor: pointer; font-family: 'Inter', sans-serif; border: none; }
   flex: 0 0 300px;
   width: 300px;
 }
-.team-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 8px; }
+.team-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; gap: 8px; }
+.team-card-title { display: flex; flex-direction: column; gap: 4px; }
 .team-card-header h3 { font-size: 20px; }
+.slot-request-inline {
+  display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600;
+  color: var(--btn-settings); background: var(--surface-alt); border: 1px dashed var(--card-incomplete-border);
+  border-radius: 20px; padding: 2px 6px; width: fit-content;
+}
+.slot-request-inline button {
+  width: 18px; height: 18px; border-radius: 50%; background: var(--surface); border: 1px solid var(--border);
+  color: var(--text-main); font-weight: 700; font-size: 12px; line-height: 1; padding: 0;
+}
+.slot-request-inline button:disabled { opacity: 0.35; cursor: not-allowed; }
 .credits-pill { background: var(--surface-alt); padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; color: var(--btn-settings); white-space: nowrap; }
 .credits-pill-editable { border: 1px dashed var(--card-incomplete-border); cursor: pointer; }
 .credits-pill-editable:hover { background: var(--card-incomplete); }
