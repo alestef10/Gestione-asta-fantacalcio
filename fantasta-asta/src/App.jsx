@@ -25,9 +25,9 @@ export default function App() {
 
   const [filterRuolo, setFilterRuolo] = useState('P')
   const [search, setSearch] = useState('')
-  const [assignPlayer, setAssignPlayer] = useState(null) // player being assigned
-  const [setupOpen, setSetupOpen] = useState(false)
+  const [assignPlayer, setAssignPlayer] = useState(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   // ---------- Caricamento dati + realtime ----------
   const loadAll = useCallback(async () => {
@@ -56,6 +56,11 @@ export default function App() {
     return () => supabase.removeChannel(channel)
   }, [loadAll])
 
+  // Quando cambia la fase corrente lato server, allinea il filtro visibile
+  useEffect(() => {
+    if (config?.current_phase) setFilterRuolo(config.current_phase)
+  }, [config?.current_phase])
+
   // ---------- Editor PIN ----------
   const tryUnlock = () => {
     if (config && pinInput === config.editor_pin) {
@@ -66,16 +71,26 @@ export default function App() {
     }
   }
 
-  // ---------- Slot calcolati ----------
-  const slotConfig = useMemo(() => {
+  // ---------- Slot base / massimi (globali, da config) ----------
+  const slotBase = useMemo(() => {
     if (!config) return { P: 3, D: 8, C: 8, A: 6 }
-    return {
-      P: 3,
-      D: 8 + (config.slot_extra_d || 0),
-      C: 8 + (config.slot_extra_c || 0),
-      A: 6 + (config.slot_extra_a || 0),
-    }
+    return { P: config.slot_base_p, D: config.slot_base_d, C: config.slot_base_c, A: config.slot_base_a }
   }, [config])
+
+  const maxExtra = useMemo(() => {
+    if (!config) return { P: 0, D: 2, C: 2, A: 1 }
+    return { P: config.max_extra_p, D: config.max_extra_d, C: config.max_extra_c, A: config.max_extra_a }
+  }, [config])
+
+  // Slot effettivi di una squadra per ruolo = base + extra_squadra (capped al massimo)
+  const teamSlotFor = useCallback(
+    (team, ruolo) => {
+      const key = `extra_${ruolo.toLowerCase()}`
+      const extra = Math.min(team[key] || 0, maxExtra[ruolo])
+      return slotBase[ruolo] + extra
+    },
+    [slotBase, maxExtra]
+  )
 
   // ---------- Dati derivati per squadra ----------
   const teamStats = useMemo(() => {
@@ -90,14 +105,23 @@ export default function App() {
           const pl = players.find((pp) => pp.id === p.player_id)
           return pl?.ruolo === r
         }).length
-        perRuolo[r] = { occupati, tot: slotConfig[r] }
+        perRuolo[r] = { occupati, tot: teamSlotFor(t, r) }
       }
       const slotLiberi = RUOLI.reduce((s, r) => s + Math.max(perRuolo[r].tot - perRuolo[r].occupati, 0), 0)
       const maxRilancio = slotLiberi > 0 ? Math.max(rimanenti - (slotLiberi - 1), 0) : rimanenti
       map[t.id] = { speso, rimanenti, perRuolo, slotLiberi, maxRilancio, picks: teamPicks }
     }
     return map
-  }, [teams, picks, players, slotConfig])
+  }, [teams, picks, players, teamSlotFor])
+
+  // ---------- Gestione slot per squadra (contestuale al ruolo attivo) ----------
+  const changeTeamSlot = async (team, ruolo, delta) => {
+    const key = `extra_${ruolo.toLowerCase()}`
+    const current = team[key] || 0
+    const next = Math.max(0, Math.min(maxExtra[ruolo], current + delta))
+    if (next === current) return
+    await supabase.from('teams').update({ [key]: next }).eq('id', team.id)
+  }
 
   // ---------- Import CSV lista giocatori ----------
   const handleImportFile = (file) => {
@@ -152,14 +176,26 @@ export default function App() {
 
   // ---------- Setup squadre iniziali ----------
   const createTeams = async (list) => {
-    // list: [{nome, crediti_iniziali}, ...]
     const { error } = await supabase.from('teams').insert(list)
     if (error) alert('Errore: ' + error.message)
-    setSetupOpen(false)
   }
 
-  const updateSlotExtra = async (field, value) => {
-    await supabase.from('config').update({ [field]: value }).eq('id', 1)
+  // ---------- Fasi asta ----------
+  const phaseIndex = RUOLI.indexOf(config?.current_phase || 'P')
+  const advancePhase = async () => {
+    const next = RUOLI[phaseIndex + 1]
+    if (!next) return
+    if (!confirm(`Passare alla fase "${RUOLO_LABEL[next]}"? Le fasi precedenti restano comunque consultabili.`)) return
+    await supabase.from('config').update({ current_phase: next }).eq('id', 1)
+    setFilterRuolo(next)
+  }
+
+  // ---------- Impostazioni avanzate ----------
+  const updateTeamCredits = async (teamId, crediti) => {
+    await supabase.from('teams').update({ crediti_iniziali: Number(crediti) }).eq('id', teamId)
+  }
+  const updateSlotSettings = async (patch) => {
+    await supabase.from('config').update(patch).eq('id', 1)
   }
 
   // ---------- Export Excel ----------
@@ -230,6 +266,9 @@ export default function App() {
           ) : (
             <>
               <span className="editor-badge">Modalità editor attiva</span>
+              <button className="btn-secondary" onClick={() => setSettingsOpen(true)}>
+                Impostazioni
+              </button>
               <button className="btn-secondary" onClick={() => setImportOpen(true)}>
                 Importa lista
               </button>
@@ -241,18 +280,47 @@ export default function App() {
         </div>
       </header>
 
+      <div className="phase-bar">
+        <div className="phase-steps">
+          {RUOLI.map((r, i) => (
+            <span
+              key={r}
+              className={
+                'phase-step' +
+                (i === phaseIndex ? ' current' : '') +
+                (i < phaseIndex ? ' done' : '') +
+                (i > phaseIndex ? ' upcoming' : '')
+              }
+            >
+              {RUOLO_LABEL[r]}
+            </span>
+          ))}
+        </div>
+        {isEditor && phaseIndex < RUOLI.length - 1 && (
+          <button className="btn-mini" onClick={advancePhase}>
+            Passa a {RUOLO_LABEL[RUOLI[phaseIndex + 1]]} →
+          </button>
+        )}
+      </div>
+
       <div className="layout">
         <aside className="sidebar">
           <div className="ruolo-tabs">
-            {RUOLI.map((r) => (
-              <button
-                key={r}
-                className={filterRuolo === r ? 'active' : ''}
-                onClick={() => setFilterRuolo(r)}
-              >
-                {RUOLO_LABEL[r]}
-              </button>
-            ))}
+            {RUOLI.map((r, i) => {
+              const locked = i > phaseIndex
+              return (
+                <button
+                  key={r}
+                  disabled={locked}
+                  className={(filterRuolo === r ? 'active' : '') + (locked ? ' locked' : '')}
+                  onClick={() => !locked && setFilterRuolo(r)}
+                  title={locked ? 'Fase non ancora iniziata' : ''}
+                >
+                  {locked ? '🔒 ' : ''}
+                  {RUOLO_LABEL[r]}
+                </button>
+              )
+            })}
           </div>
           <input
             className="search-box"
@@ -277,30 +345,6 @@ export default function App() {
               </div>
             ))}
           </div>
-
-          {isEditor && (
-            <div className="slot-extra-panel">
-              <h4>Slot extra</h4>
-              <SlotExtraRow
-                label="Difensori (+2 max)"
-                value={config.slot_extra_d}
-                max={2}
-                onChange={(v) => updateSlotExtra('slot_extra_d', v)}
-              />
-              <SlotExtraRow
-                label="Centrocampisti (+2 max)"
-                value={config.slot_extra_c}
-                max={2}
-                onChange={(v) => updateSlotExtra('slot_extra_c', v)}
-              />
-              <SlotExtraRow
-                label="Attaccanti (+1 max)"
-                value={config.slot_extra_a}
-                max={1}
-                onChange={(v) => updateSlotExtra('slot_extra_a', v)}
-              />
-            </div>
-          )}
         </aside>
 
         <main className="board">
@@ -311,9 +355,11 @@ export default function App() {
                 team={t}
                 stats={teamStats[t.id]}
                 players={players}
-                slotConfig={slotConfig}
+                activeRuolo={filterRuolo}
+                maxExtra={maxExtra}
                 isEditor={isEditor}
                 onRemovePick={removePick}
+                onChangeSlot={changeTeamSlot}
               />
             ))}
           </div>
@@ -330,27 +376,26 @@ export default function App() {
         />
       )}
 
-      {importOpen && (
-        <ImportModal onCancel={() => setImportOpen(false)} onFile={handleImportFile} />
+      {importOpen && <ImportModal onCancel={() => setImportOpen(false)} onFile={handleImportFile} />}
+
+      {settingsOpen && (
+        <SettingsModal
+          config={config}
+          teams={teams}
+          onCancel={() => setSettingsOpen(false)}
+          onUpdateCredits={updateTeamCredits}
+          onUpdateSlotSettings={updateSlotSettings}
+        />
       )}
     </div>
   )
 }
 
-function SlotExtraRow({ label, value, max, onChange }) {
-  return (
-    <div className="slot-extra-row">
-      <span>{label}</span>
-      <div className="stepper">
-        <button onClick={() => onChange(Math.max(0, value - 1))}>−</button>
-        <strong>{value}</strong>
-        <button onClick={() => onChange(Math.min(max, value + 1))}>+</button>
-      </div>
-    </div>
-  )
-}
+function TeamCard({ team, stats, players, activeRuolo, maxExtra, isEditor, onRemovePick, onChangeSlot }) {
+  const key = `extra_${activeRuolo.toLowerCase()}`
+  const currentExtra = team[key] || 0
+  const canAddSlot = isEditor && maxExtra[activeRuolo] > 0
 
-function TeamCard({ team, stats, players, slotConfig, isEditor, onRemovePick }) {
   return (
     <div className="team-card">
       <div className="team-card-header">
@@ -374,10 +419,24 @@ function TeamCard({ team, stats, players, slotConfig, isEditor, onRemovePick }) 
       <div className="slot-bar">
         {RUOLI.map((r) => (
           <span key={r} className={`slot-chip role-${r}`}>
-            {r} {stats.perRuolo[r].occupati}/{slotConfig[r]}
+            {r} {stats.perRuolo[r].occupati}/{stats.perRuolo[r].tot}
           </span>
         ))}
       </div>
+
+      {canAddSlot && (
+        <div className="team-slot-request">
+          <span>Slot extra {RUOLO_LABEL[activeRuolo]}</span>
+          <div className="stepper">
+            <button onClick={() => onChangeSlot(team, activeRuolo, -1)}>−</button>
+            <strong>
+              {currentExtra}/{maxExtra[activeRuolo]}
+            </strong>
+            <button onClick={() => onChangeSlot(team, activeRuolo, 1)}>+</button>
+          </div>
+        </div>
+      )}
+
       <div className="team-roster">
         {stats.picks.length === 0 && <p className="empty-hint">Nessun giocatore ancora.</p>}
         {stats.picks.map((p) => {
@@ -406,10 +465,7 @@ function AssignModal({ player, teams, teamStats, onCancel, onConfirm }) {
   const [prezzo, setPrezzo] = useState(1)
   const [tag, setTag] = useState('normale')
 
-  const tagOptions =
-    player.ruolo === 'P'
-      ? ['normale', 'blocco_portieri']
-      : ['normale', 'conferma', 'prelazione']
+  const tagOptions = player.ruolo === 'P' ? ['normale', 'blocco_portieri'] : ['normale', 'conferma', 'prelazione']
 
   return (
     <div className="modal-overlay" onClick={onCancel}>
@@ -456,11 +512,109 @@ function ImportModal({ onCancel, onFile }) {
         <p className="modal-hint">
           File CSV con colonne: <code>nome, ruolo, squadra, codice</code>. Ruolo deve essere P, D, C o A.
         </p>
-        <input
-          type="file"
-          accept=".csv"
-          onChange={(e) => e.target.files[0] && onFile(e.target.files[0])}
-        />
+        <input type="file" accept=".csv" onChange={(e) => e.target.files[0] && onFile(e.target.files[0])} />
+        <div className="modal-actions">
+          <button className="btn-secondary" onClick={onCancel}>
+            Chiudi
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SettingsModal({ config, teams, onCancel, onUpdateCredits, onUpdateSlotSettings }) {
+  const [credits, setCredits] = useState(() => Object.fromEntries(teams.map((t) => [t.id, t.crediti_iniziali])))
+  const [slots, setSlots] = useState({
+    slot_base_p: config.slot_base_p,
+    slot_base_d: config.slot_base_d,
+    slot_base_c: config.slot_base_c,
+    slot_base_a: config.slot_base_a,
+    max_extra_p: config.max_extra_p,
+    max_extra_d: config.max_extra_d,
+    max_extra_c: config.max_extra_c,
+    max_extra_a: config.max_extra_a,
+  })
+
+  const saveCredits = async () => {
+    for (const t of teams) {
+      if (Number(credits[t.id]) !== t.crediti_iniziali) {
+        await onUpdateCredits(t.id, credits[t.id])
+      }
+    }
+    alert('Crediti aggiornati.')
+  }
+
+  const saveSlots = async () => {
+    await onUpdateSlotSettings(slots)
+    alert('Impostazioni slot aggiornate.')
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+        <h3>Impostazioni avanzate</h3>
+
+        <h4 className="settings-section-title">Slot base e massimi per ruolo</h4>
+        <p className="modal-hint">
+          "Base" è lo slot minimo garantito a ogni squadra. "Extra max" è quanti slot in più una squadra può
+          richiedere durante la relativa fase.
+        </p>
+        <div className="settings-slot-grid">
+          {RUOLI.map((r) => (
+            <div key={r} className="settings-slot-row">
+              <span className={`role-chip role-${r}`}>{r}</span>
+              <label>
+                Base
+                <input
+                  type="number"
+                  min="0"
+                  value={slots[`slot_base_${r.toLowerCase()}`]}
+                  onChange={(e) =>
+                    setSlots((s) => ({ ...s, [`slot_base_${r.toLowerCase()}`]: Number(e.target.value) }))
+                  }
+                />
+              </label>
+              <label>
+                Extra max
+                <input
+                  type="number"
+                  min="0"
+                  value={slots[`max_extra_${r.toLowerCase()}`]}
+                  onChange={(e) =>
+                    setSlots((s) => ({ ...s, [`max_extra_${r.toLowerCase()}`]: Number(e.target.value) }))
+                  }
+                />
+              </label>
+            </div>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button className="btn-primary" onClick={saveSlots}>
+            Salva impostazioni slot
+          </button>
+        </div>
+
+        <h4 className="settings-section-title">Crediti iniziali per squadra</h4>
+        <div className="settings-credits-grid">
+          {teams.map((t) => (
+            <label key={t.id} className="settings-credit-row">
+              {t.nome}
+              <input
+                type="number"
+                min="0"
+                value={credits[t.id]}
+                onChange={(e) => setCredits((c) => ({ ...c, [t.id]: e.target.value }))}
+              />
+            </label>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button className="btn-primary" onClick={saveCredits}>
+            Salva crediti
+          </button>
+        </div>
+
         <div className="modal-actions">
           <button className="btn-secondary" onClick={onCancel}>
             Chiudi
@@ -498,7 +652,7 @@ function SetupScreen({ onCreate }) {
         <p>Prima di iniziare, crea le squadre partecipanti.</p>
         <label>Numero squadre</label>
         <input type="number" min="2" max="20" value={n} onChange={(e) => handleNChange(e.target.value)} />
-        <label>Crediti iniziali (uguali per tutti, modificabile dopo per squadra da Supabase)</label>
+        <label>Crediti iniziali (uguali per tutti, modificabile dopo per squadra dal pannello Impostazioni)</label>
         <input
           type="number"
           min="500"
