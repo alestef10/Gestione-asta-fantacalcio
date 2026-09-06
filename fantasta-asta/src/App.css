@@ -120,52 +120,7 @@ button { cursor: pointer; font-family: 'Inter', sans-serif; border: none; }
   padding: 0 4px;
 }
 
-/* ---------- Layout ---------- */
-.layout { display: flex; gap: 0; align-items: flex-start; }
-
-.sidebar {
-  width: 300px;
-  flex-shrink: 0;
-  background: var(--surface);
-  min-height: calc(100vh - 62px);
-  padding: 18px;
-  border-right: 2px solid var(--border);
-}
-
-.ruolo-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-.ruolo-tabs button {
-  flex: 1 1 45%;
-  background: var(--surface-alt);
-  color: var(--text-main);
-  padding: 8px 4px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  border: 1px solid transparent;
-}
-.ruolo-tabs button.active { background: var(--btn-primary); color: #ffffff; }
-
-.search-box {
-  width: 100%;
-  padding: 9px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface-alt);
-  color: var(--text-main);
-  margin-bottom: 12px;
-}
-
-.player-list { max-height: 42vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
-.player-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--surface-alt);
-  border: 1px solid var(--border);
-  padding: 8px 10px;
-  border-radius: 8px;
-}
-.player-sub { font-size: 12px; color: var(--text-muted); }
+/* (layout sidebar verticale rimosso: vedi .selector-bar più sotto) */
 
 .role-chip {
   display: inline-block;
@@ -242,12 +197,68 @@ button { cursor: pointer; font-family: 'Inter', sans-serif; border: none; }
 .settings-credit-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; gap: 8px; }
 .settings-credit-row input { width: 80px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-alt); color: var(--text-main); }
 
-/* ---------- Board / team cards ---------- */
-.board { flex: 1; padding: 20px; }
-.teams-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+/* ---------- Selettore giocatore orizzontale (in alto) ---------- */
+.selector-bar {
+  background: var(--surface);
+  border-bottom: 2px solid var(--border);
+  padding: 14px 24px;
+}
+.ruolo-tabs-horizontal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.ruolo-tabs-horizontal button {
+  background: var(--surface-alt);
+  color: var(--text-main);
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.ruolo-tabs-horizontal button.active { background: var(--btn-primary); color: #ffffff; }
+.ruolo-tabs-horizontal button.locked { opacity: 0.45; cursor: not-allowed; }
+.search-box-inline { margin-left: auto; width: 220px; margin-bottom: 0; }
+
+.search-box {
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-alt);
+  color: var(--text-main);
+}
+
+.player-list-horizontal {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+.player-chip-card {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  min-width: 190px;
+}
+.player-chip-info { display: flex; flex-direction: column; margin-right: 6px; }
+.player-chip-info strong { font-size: 13px; }
+.player-sub { font-size: 11px; color: var(--text-muted); }
+
+/* ---------- Board / squadre in riga ---------- */
+.board { padding: 20px 24px; }
+.teams-row {
+  display: flex;
   gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 12px;
 }
 
 .team-card {
@@ -256,10 +267,18 @@ button { cursor: pointer; font-family: 'Inter', sans-serif; border: none; }
   border-radius: 12px;
   padding: 14px 16px;
   box-shadow: 0 1px 3px rgba(3, 47, 110, 0.08);
+  flex: 0 0 300px;
+  width: 300px;
 }
-.team-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.team-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 8px; }
 .team-card-header h3 { font-size: 20px; }
-.credits-pill { background: var(--surface-alt); padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; color: var(--btn-settings); }
+.credits-pill { background: var(--surface-alt); padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; color: var(--btn-settings); white-space: nowrap; }
+.credits-pill-editable { border: 1px dashed var(--card-incomplete-border); cursor: pointer; }
+.credits-pill-editable:hover { background: var(--card-incomplete); }
+.credits-edit-input {
+  width: 90px; padding: 4px 8px; border-radius: 20px; border: 1px solid var(--btn-primary);
+  background: var(--surface-alt); color: var(--text-main); font-weight: 600; font-size: 12px;
+}
 
 .team-card-stats { display: flex; justify-content: space-between; margin-bottom: 10px; }
 .team-card-stats > div { display: flex; flex-direction: column; align-items: center; }
@@ -274,20 +293,17 @@ button { cursor: pointer; font-family: 'Inter', sans-serif; border: none; }
 .slot-chip.role-C { background: var(--role-c); }
 .slot-chip.role-A { background: var(--role-a); }
 
-.team-roster { display: flex; flex-direction: column; gap: 5px; max-height: 220px; overflow-y: auto; }
+.team-roster { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
+.roster-role-group { display: flex; flex-direction: column; gap: 5px; }
 .roster-row { display: flex; align-items: center; gap: 6px; font-size: 13px; background: var(--surface-alt); padding: 5px 8px; border-radius: 6px; }
+.roster-row-empty { background: transparent; border: 1px dashed var(--card-incomplete-border); opacity: 0.75; }
+.roster-empty-label { font-style: italic; color: var(--text-muted); }
 .roster-name { flex: 1; color: var(--text-main); }
 .roster-price { font-weight: 700; color: var(--btn-primary); }
 .tag-chip { font-size: 10px; padding: 2px 6px; border-radius: 5px; color: #ffffff; background: var(--text-muted); }
 .tag-conferma { background: var(--role-c); }
 .tag-prelazione { background: var(--role-a); }
 .tag-blocco_portieri { background: var(--role-p); }
-
-/* Righe roster tinte per ruolo (usando gli sfondi categoria) */
-.roster-row:has(.role-P) { background: var(--bg-role-p); }
-.roster-row:has(.role-D) { background: var(--bg-role-d); }
-.roster-row:has(.role-C) { background: var(--bg-role-c); }
-.roster-row:has(.role-A) { background: var(--bg-role-a); }
 
 /* ---------- Modals ---------- */
 .modal-overlay {
