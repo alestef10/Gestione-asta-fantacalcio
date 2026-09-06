@@ -45,6 +45,8 @@ body {
   letter-spacing: 1px;
   color: var(--text-main);
 }
+.error-screen { flex-direction: column; gap: 14px; text-align: center; padding: 20px; }
+.error-detail { font-family: 'Inter', sans-serif; font-size: 14px; color: var(--text-muted); max-width: 400px; }
 
 h1, h2, h3, h4 {
   font-family: 'Barlow Condensed', sans-serif;
