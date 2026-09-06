@@ -303,29 +303,37 @@ export default function App() {
     XLSX.writeFile(wb, `asta_fantacalcio_${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
-  // ---------- Export CSV per import su piattaforme lega (Fantacalcio-Online, Leghe Fantacalcio, ecc.) ----------
+  // ---------- Export CSV formato FantaAsta Live / Leghe Fantacalcio ----------
+  // Formato: nessuna intestazione, righe "$,$,$" a separare i blocchi squadra,
+  // poi righe "NomeSquadra,IdGiocatore,PrezzoPagato". L'Id DEVE essere quello
+  // ufficiale del listone fantacalcio.it (colonna "codice" importata insieme ai giocatori).
   const exportForLega = () => {
-    const rows = []
+    const senzaId = []
+    const lines = []
     for (const t of teams) {
+      lines.push('$,$,$')
       const st = teamStats[t.id]
       for (const p of st.picks) {
         const pl = players.find((pp) => pp.id === p.player_id)
-        rows.push({
-          Fantasquadra: t.nome,
-          Calciatore: pl?.nome || '?',
-          Ruolo: pl?.ruolo || '?',
-          'Squadra Serie A': pl?.squadra_reale || '?',
-          Prezzo: p.prezzo,
-          Id: pl?.codice || '',
-        })
+        const id = (pl?.codice || '').trim()
+        if (!id) senzaId.push(`${pl?.nome || '?'} (${t.nome})`)
+        lines.push(`${t.nome},${id},${p.prezzo}`)
       }
     }
-    const csv = Papa.unparse(rows, { delimiter: ';' })
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
+    if (senzaId.length > 0) {
+      alert(
+        'Attenzione: questi giocatori non hanno un Id salvato e nel file esportato risulteranno senza ID ' +
+          '(l\'import su Leghe Fantacalcio probabilmente li scarterà):\n\n' +
+          senzaId.join('\n') +
+          '\n\nControlla che la lista giocatori importata contenga la colonna Id con il codice ufficiale del listone.'
+      )
+    }
+    const csv = lines.join('\r\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `rose_import_lega_${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = `fanta-asta-live-rosters_${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -379,7 +387,7 @@ export default function App() {
             Esporta Excel
           </button>
           <button className="btn-primary btn-primary-alt" onClick={exportForLega}>
-            Esporta per import lega
+            Esporta per Leghe Fantacalcio
           </button>
         </div>
       </header>
@@ -647,6 +655,11 @@ function ImportModal({ onCancel, onFile }) {
         <p className="modal-hint">
           File CSV con colonne: <code>Nome, Ruolo, Squadra, Id</code>. Ruolo deve essere P, D, C o A. Il campo Id
           viene salvato ma mai mostrato durante la selezione.
+        </p>
+        <p className="modal-hint danger-text">
+          Importante: se poi userai "Esporta per Leghe Fantacalcio", il campo Id deve essere l'ID ufficiale del
+          listone quotazioni scaricato da fantacalcio.it — non un codice a piacere — altrimenti l'import sulla
+          piattaforma della lega non troverà corrispondenza.
         </p>
         <input type="file" accept=".csv" onChange={(e) => e.target.files[0] && onFile(e.target.files[0])} />
         <div className="modal-actions">
