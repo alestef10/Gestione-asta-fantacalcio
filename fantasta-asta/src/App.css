@@ -326,3 +326,14 @@ button { cursor: pointer; font-family: 'Inter', sans-serif; border: none; }
   background: var(--surface-alt); color: var(--text-main); margin-bottom: 10px;
 }
 .names-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; max-height: 240px; overflow-y: auto; }
+
+.setup-default-credits-row { display: flex; gap: 8px; margin-bottom: 14px; }
+.setup-default-credits-row input { flex: 1; margin-bottom: 0; }
+.setup-team-grid { grid-template-columns: 1fr; }
+.setup-team-row { display: flex; gap: 8px; }
+.setup-team-row input:first-child { flex: 2; }
+.setup-team-credits { flex: 1; }
+
+.danger-text { color: var(--danger); font-weight: 600; }
+.btn-primary-alt { background: var(--btn-settings); }
+.phase-back-btn { margin-right: 6px; }
