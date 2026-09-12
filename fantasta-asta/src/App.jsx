@@ -178,29 +178,33 @@ export default function App() {
 
   // ---------- Import CSV lista giocatori ----------
   const handleImportFile = (file) => {
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (res) => {
-        const rows = res.data
-          .map((r) => ({
-            nome: (r.Nome || r.nome || '').trim(),
-            ruolo: (r.Ruolo || r.ruolo || '').trim().toUpperCase().slice(0, 1),
-            squadra_reale: (r.Squadra || r.squadra || r.squadra_reale || '').trim(),
-            codice: (r.Id || r.ID || r.id || r.Codice || r.codice || '').toString().trim(),
-          }))
-          .filter((r) => r.nome && RUOLI.includes(r.ruolo))
-        if (rows.length === 0) {
-          alert('Nessuna riga valida trovata. Colonne attese: Nome, Ruolo, Squadra, Id')
-          return
-        }
-        const { error } = await supabase.from('players').insert(rows)
-        if (error) alert('Errore import: ' + error.message)
-        else {
-          alert(`Importati ${rows.length} giocatori.`)
-          setImportOpen(false)
-        }
-      },
+    return new Promise((resolve) => {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: async (res) => {
+          const rows = res.data
+            .map((r) => ({
+              nome: (r.Nome || r.nome || '').trim(),
+              ruolo: (r.Ruolo || r.ruolo || '').trim().toUpperCase().slice(0, 1),
+              squadra_reale: (r.Squadra || r.squadra || r.squadra_reale || '').trim(),
+              codice: (r.Id || r.ID || r.id || r.Codice || r.codice || '').toString().trim(),
+            }))
+            .filter((r) => r.nome && RUOLI.includes(r.ruolo))
+          if (rows.length === 0) {
+            alert('Nessuna riga valida trovata. Colonne attese: Nome, Ruolo, Squadra, Id')
+            resolve()
+            return
+          }
+          const { error } = await supabase.from('players').insert(rows)
+          if (error) alert('Errore import: ' + error.message)
+          else {
+            alert(`Importati ${rows.length} giocatori.`)
+            setImportOpen(false)
+          }
+          resolve()
+        },
+      })
     })
   }
 
@@ -738,6 +742,14 @@ function AssignModal({ player, teams, teamStats, onCancel, onConfirm }) {
   const [teamId, setTeamId] = useState(teamsWithRoom[0]?.id || '')
   const [prezzo, setPrezzo] = useState(1)
   const [tag, setTag] = useState('normale')
+  const [submitting, setSubmitting] = useState(false)
+
+  const handleConfirm = async () => {
+    if (submitting) return
+    setSubmitting(true)
+    await onConfirm({ teamId, prezzo, tag })
+    setSubmitting(false)
+  }
 
   const tagOptions = player.ruolo === 'P' ? ['normale', 'blocco_portieri'] : ['normale', 'conferma', 'prelazione']
 
@@ -784,8 +796,8 @@ function AssignModal({ player, teams, teamStats, onCancel, onConfirm }) {
             Annulla
           </button>
           {teamsWithRoom.length > 0 && (
-            <button className="btn-primary" onClick={() => onConfirm({ teamId, prezzo, tag })}>
-              Conferma acquisto
+            <button className="btn-primary" onClick={handleConfirm} disabled={submitting}>
+              {submitting ? 'Salvataggio…' : 'Conferma acquisto'}
             </button>
           )}
         </div>
@@ -795,6 +807,15 @@ function AssignModal({ player, teams, teamStats, onCancel, onConfirm }) {
 }
 
 function ImportModal({ onCancel, onFile }) {
+  const [busy, setBusy] = useState(false)
+  const handleChange = async (e) => {
+    const file = e.target.files[0]
+    if (!file || busy) return
+    setBusy(true)
+    await onFile(file)
+    setBusy(false)
+    e.target.value = ''
+  }
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -808,7 +829,8 @@ function ImportModal({ onCancel, onFile }) {
           listone quotazioni scaricato da fantacalcio.it — non un codice a piacere — altrimenti l'import sulla
           piattaforma della lega non troverà corrispondenza.
         </p>
-        <input type="file" accept=".csv" onChange={(e) => e.target.files[0] && onFile(e.target.files[0])} />
+        <input type="file" accept=".csv" disabled={busy} onChange={handleChange} />
+        {busy && <p className="modal-hint">Importazione in corso…</p>}
         <div className="modal-actions">
           <button className="btn-secondary" onClick={onCancel}>
             Chiudi
