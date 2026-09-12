@@ -301,17 +301,25 @@ export default function App() {
   }
 
   // ---------- Reset asta ----------
+
   const resetAsta = async () => {
     const conferma = prompt(
       'Questo cancellerà TUTTI gli acquisti fatti finora (le squadre e la lista giocatori restano). Scrivi RESET per confermare:'
     )
     if (conferma !== 'RESET') return
-    await supabase.from('picks').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-    await supabase.from('players').update({ acquistato: false }).neq('id', '00000000-0000-0000-0000-000000000000')
+    // Azzera prima il riferimento all'ultimo rilancio, altrimenti eventuali vincoli non danno problemi qui
+    // (le squadre non vengono cancellate in questo reset), ma lo facciamo comunque per coerenza.
+    await supabase.from('config').update({ last_bid_team_id: null, timer_end_at: null, timer_active: false }).eq('id', 1)
+    const r1 = await supabase.from('picks').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    if (r1.error) return alert('Errore cancellando gli acquisti: ' + r1.error.message)
+    const r2 = await supabase.from('players').update({ acquistato: false }).neq('id', '00000000-0000-0000-0000-000000000000')
+    if (r2.error) return alert('Errore azzerando i giocatori: ' + r2.error.message)
     for (const t of teams) {
-      await supabase.from('teams').update({ extra_p: 0, extra_d: 0, extra_c: 0, extra_a: 0 }).eq('id', t.id)
+      const r = await supabase.from('teams').update({ extra_p: 0, extra_d: 0, extra_c: 0, extra_a: 0 }).eq('id', t.id)
+      if (r.error) return alert('Errore azzerando gli slot extra: ' + r.error.message)
     }
-    await supabase.from('config').update({ current_phase: 'P' }).eq('id', 1)
+    const r3 = await supabase.from('config').update({ current_phase: 'P' }).eq('id', 1)
+    if (r3.error) return alert('Errore riportando la fase a Portieri: ' + r3.error.message)
     alert('Asta resettata: acquisti azzerati, fase riportata a Portieri.')
   }
 
@@ -320,11 +328,24 @@ export default function App() {
       'Questo cancellerà ANCHE le squadre e la lista giocatori importata (si riparte dalla schermata di setup iniziale). Scrivi CANCELLA TUTTO per confermare:'
     )
     if (conferma !== 'CANCELLA TUTTO') return
-    await supabase.from('picks').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-    await supabase.from('players').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-    await supabase.from('teams').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-    await supabase.from('config').update({ current_phase: 'P' }).eq('id', 1)
-    alert('Tutto cancellato. Ricarica la pagina per ricominciare dal setup.')
+    // Fondamentale: azzera il riferimento all'ultimo rilancio PRIMA di cancellare le squadre,
+    // altrimenti la cancellazione delle squadre fallisce per vincolo di integrità referenziale.
+    const r0 = await supabase
+      .from('config')
+      .update({ last_bid_team_id: null, timer_end_at: null, timer_active: false, current_phase: 'P' })
+      .eq('id', 1)
+    if (r0.error) return alert('Errore preparando il reset: ' + r0.error.message)
+
+    const r1 = await supabase.from('picks').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    if (r1.error) return alert('Errore cancellando gli acquisti: ' + r1.error.message)
+
+    const r2 = await supabase.from('players').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    if (r2.error) return alert('Errore cancellando i giocatori: ' + r2.error.message)
+
+    const r3 = await supabase.from('teams').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+    if (r3.error) return alert('Errore cancellando le squadre: ' + r3.error.message)
+
+    alert('Tutto cancellato. La pagina tornerà automaticamente al setup iniziale.')
   }
 
   // ---------- Export Excel (riepilogo generale) ----------
